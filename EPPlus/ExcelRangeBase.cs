@@ -1089,11 +1089,11 @@ namespace OfficeOpenXml
 
         private static string GetDateText(DateTime d, string format, ExcelNumberFormatXml.ExcelFormatTranslator nf)
         {
-            if(nf.SpecialDateFormat==ExcelNumberFormatXml.ExcelFormatTranslator.eSystemDateFormat.SystemLongDate)
+            if (nf.SpecialDateFormat == ExcelNumberFormatXml.ExcelFormatTranslator.eSystemDateFormat.SystemLongDate)
             {
                 return d.ToLongDateString();
             }
-            else if(nf.SpecialDateFormat == ExcelNumberFormatXml.ExcelFormatTranslator.eSystemDateFormat.SystemLongTime)
+            else if (nf.SpecialDateFormat == ExcelNumberFormatXml.ExcelFormatTranslator.eSystemDateFormat.SystemLongTime)
             {
                 return d.ToLongTimeString();
             }
@@ -2018,24 +2018,28 @@ namespace OfficeOpenXml
         {
             var type = typeof(T);
             bool isSameType = true;
+            IEnumerable<EPPlus.Utils.MemberWithMetadata> richMembers = null;
             if (Members == null)
             {
-                Members = type.GetProperties(memberFlags);
+                richMembers = EPPlus.Utils.ReflectionUtility.GetMembersWithMetadata(type, memberFlags);
             }
             else
             {
-                if (Members.Length == 0)   //Fixes issue 15555
+                if (!richMembers.Any())   //Fixes issue 15555
                 {
                     throw (new ArgumentException("Parameter Members must have at least one property. Length is zero"));
                 }
-                foreach (var t in Members)
+
+                richMembers = EPPlus.Utils.ReflectionUtility.GetMembersWithMetadata(Members);
+
+                foreach (var t in richMembers)
                 {
-                    if (t.DeclaringType != null && t.DeclaringType != type)
+                    if (t.MemberInfo.DeclaringType != null && t.MemberInfo.DeclaringType != type)
                     {
                         isSameType = false;
                     }
                     //Fixing inverted check for IsSubclassOf / Pullrequest from tomdam
-                    if (t.DeclaringType != null && t.DeclaringType != type && !TypeCompat.IsSubclassOf(type, t.DeclaringType) && !TypeCompat.IsSubclassOf(t.DeclaringType, type))
+                    if (t.MemberInfo.DeclaringType != null && t.MemberInfo.DeclaringType != type && !TypeCompat.IsSubclassOf(type, t.MemberInfo.DeclaringType) && !TypeCompat.IsSubclassOf(t.MemberInfo.DeclaringType, type))
                     {
                         throw new InvalidCastException("Supplied properties in parameter Properties must be of the same type as T (or an assignable type from T)");
                     }
@@ -2043,31 +2047,26 @@ namespace OfficeOpenXml
             }
 
             // create buffer
-            object[,] values = new object[(PrintHeaders ? Collection.Count() + 1 : Collection.Count()), Members.Count()];
-
+            object[,] values = new object[(PrintHeaders ? Collection.Count() + 1 : Collection.Count()), richMembers.Count()];
             int col = 0, row = 0;
-            if (Members.Length > 0 && PrintHeaders)
+            if (richMembers.Any() && PrintHeaders)
             {
-                foreach (var t in Members)
+                foreach (var t in richMembers)
                 {
-                    var descriptionAttribute = t.GetCustomAttributes(typeof(DescriptionAttribute), false).FirstOrDefault() as DescriptionAttribute;
                     var header = string.Empty;
-                    if (descriptionAttribute != null)
+                    if (t.DescriptionAttribute != null)
                     {
-                        header = descriptionAttribute.Description;
+                        header = t.DescriptionAttribute.Description;
                     }
                     else
                     {
-                        var displayNameAttribute =
-                            t.GetCustomAttributes(typeof(DisplayNameAttribute), false).FirstOrDefault() as
-                            DisplayNameAttribute;
-                        if (displayNameAttribute != null)
+                        if (t.DisplayNameAttribute != null)
                         {
-                            header = displayNameAttribute.DisplayName;
+                            header = t.DisplayNameAttribute.DisplayName;
                         }
                         else
                         {
-                            header = t.Name.Replace('_', ' ');
+                            header = t.MemberInfo.Name.Replace('_', ' ');
                         }
                     }
                     //_worksheet.SetValueInner(row, col++, header);
@@ -2076,10 +2075,11 @@ namespace OfficeOpenXml
                 row++;
             }
 
-            if (!Collection.Any() && (Members.Length == 0 || PrintHeaders == false))
+            if (!Collection.Any() && (!richMembers.Any() || PrintHeaders == false))
             {
                 return null;
             }
+
 
             foreach (var item in Collection)
             {
@@ -2090,24 +2090,16 @@ namespace OfficeOpenXml
                 }
                 else
                 {
-                    foreach (var t in Members)
+                    foreach (var t in richMembers)
                     {
-                        if (isSameType == false && item.GetType().GetMember(t.Name, memberFlags).Length == 0)
+                        if (isSameType == false && item.GetType().GetMember(t.MemberInfo.Name, memberFlags).Length == 0)
                         {
                             col++;
                             continue; //Check if the property exists if and inherited class is used
                         }
-                        else if (t is PropertyInfo)
+                        else
                         {
-                            values[row, col++] = ((PropertyInfo)t).GetValue(item, null);
-                        }
-                        else if (t is FieldInfo)
-                        {
-                            values[row, col++] = ((FieldInfo)t).GetValue(item);
-                        }
-                        else if (t is MethodInfo)
-                        {
-                            values[row, col++] = ((MethodInfo)t).Invoke(item, null);
+                            values[row, col++] = t.GetValue(item);
                         }
                     }
                 }
